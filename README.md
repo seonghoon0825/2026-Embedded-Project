@@ -2,7 +2,7 @@
 
 # Project 주제: 비접촉식 스마트 쓰레기통
 
-## 팀명: 돈터치미
+## 팀명: Dont touch me
 
 ## 조원
 
@@ -46,7 +46,6 @@ $$
 |           저항 220Ω           |   3   | LED 전류 제한                     |
 |       브레드보드, 점퍼선       | 적당량 | 배선                              |
 |      5V USB 전원 or 배터리      |   1   | 전원 공급                         |
-
 
 ## 3. 핀 배치
 
@@ -277,3 +276,4 @@ Tools → Manage Libraries 에서 아래 검색 후 설치:
 │   └── circuit_diagram.png # 회로도 이미지
 ├── .gitignore
 └── README.md
+```
