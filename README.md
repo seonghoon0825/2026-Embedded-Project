@@ -74,7 +74,10 @@
 ├── src/                    # 실제 코드가 들어가는 폴더
 │   └── main.cpp            # ESP32 메인 제어 코드
 ├── docs/                   # 프로젝트 관련 문서 폴더
-│   └── circuit_diagram.png # 회로도 이미지 파일
+│   ├── circuit_diagram.png # 회로도 이미지 파일
+│   ├── circuit_diagram.svg # 수정 가능한 회로도 파일
+│   ├── circuit_design.md   # 회로 연결 및 전원 구성 문서
+│   └── embedded_code_guide.md # 임베디드 코드 작성 가이드
 ├── .gitignore              # 깃허브에 올리지 않을 파일 목록
 └── README.md               # 프로젝트 설명 (지금 쓰고 계신 것!)
 ```
