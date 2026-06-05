@@ -66,7 +66,20 @@ Buzzer
   └─ GND (-) → GND
 ```
 
-#### Step 7: 전원 연결
+#### Step 7: LCD I2C 모듈 연결
+```
+1602 LCD I2C Module (4개 핀)
+  ├─ VCC (빨강) → ESP32 5V 또는 VIN
+  ├─ GND (검정) → ESP32 GND
+  ├─ SDA (초록) → ESP32 GPIO 21 (I2C Data)
+  └─ SCL (노랑) → ESP32 GPIO 22 (I2C Clock)
+
+⚠️ I2C 주소 확인 필요:
+  - 기본값: 0x27 또는 0x3F
+  - 코드에서 수정: const int LCD_ADDR = 0x27;
+```
+
+#### Step 8: 전원 연결
 ```
 USB 케이블 → ESP32 (시리얼 통신 + 기본 전원)
 + 
@@ -161,10 +174,10 @@ HC-SR04 Echo ────[1kΩ 저항]────┬──── ESP32 GPIO
 ```
 ① Arduino IDE 설치
 ② ESP32 보드 드라이버 설치
-③ 라이브러리 설치:
+③ 필요 라이브러리 설치:
    - Sketch → Include Library → Manage Libraries
-   - 검색: "ESP32Servo"
-   - Install
+   - 검색: "ESP32Servo" → Install
+   - 검색: "LiquidCrystal I2C" → Install (by Frank de Brabander)
 ```
 
 #### 2단계: 코드 업로드
@@ -223,20 +236,38 @@ HC-SR04 Echo ────[1kΩ 저항]────┬──── ESP32 GPIO
 3. 소리가 멈춘 후 다시 가까이 가져가면 알람 다시 울림
 ```
 
-#### Phase 6: 전체 통합 테스트
+#### Phase 6: LCD 디스플레이 테스트
+```
+1. LCD 화면이 켜지고 "Smart Trash Can" 초기화 메시지 확인
+2. 손을 센서 앞에 가져가기:
+   - Line 1: "Hand: X.Xcm" + "OPEN" (뚜껑 열림)
+   - Line 2: "Trash: OK" + "[G]" (초록색 표시)
+
+3. 내부 센서 거리 변경:
+   - 12cm 이상: "Trash: OK" + "[G]"
+   - 5~12cm: "Trash: X.Xcm" + "[Y]"
+   - 5cm 이하: "Trash: FULL!" + "[R]"
+
+4. LCD 화면 전환이 부드럽게 이루어지는지 확인
+```
+
+#### Phase 7: 전체 통합 테스트
 ```
 1. 손을 센서 앞에 가져가면:
    ✓ Lid OPENED (뚜껑이 열림)
-   ✓ 시리얼 출력: Hand + Lid + LED 상태 표시
+   ✓ LCD: Hand 거리 표시, OPEN 표시
+   ✓ 시리얼 출력: 모든 상태 표시
 
 2. 손을 뺀 후 3초 대기:
    ✓ Lid CLOSED (뚜껑이 닫힘)
+   ✓ LCD: 상태 업데이트
 
 3. 쓰레기가 차면:
    ✓ LED Red 켜짐
+   ✓ LCD: "Trash: FULL!" + "[R]" 표시
    ✓ 부저 알람음 울림
 
-성공! 🎉
+전체 동작 성공! 🎉
 ```
 
 ### 📊 시리얼 모니터 출력 예시
@@ -254,7 +285,35 @@ const float FULL_THRESHOLD_CM = 5.0;      // 가득 참 기준 (상단 5cm)
 const float YELLOW_THRESHOLD_CM = 12.0;   // 노랑 LED 기준
 const int OPEN_ANGLE = 100;               // 열림 각도
 const int CLOSE_ANGLE = 50;               // 닫힘 각도
+const int LCD_ADDR = 0x27;                // LCD I2C 주소 (0x27 또는 0x3F)
 ```
+
+### 🔍 LCD I2C 주소 확인 방법
+
+LCD가 작동하지 않으면 I2C 주소를 확인해야 합니다. 아래 스캔 코드를 임시로 사용:
+
+```cpp
+#include <Wire.h>
+
+void setup() {
+    Serial.begin(115200);
+    Wire.begin(21, 22);  // SDA=21, SCL=22
+    Serial.println("I2C 주소 스캔 중...");
+    
+    for (int i = 0; i < 128; i++) {
+        Wire.beginTransmission(i);
+        if (Wire.endTransmission() == 0) {
+            Serial.print("I2C 기기 찾음: 0x");
+            if (i < 16) Serial.print("0");
+            Serial.println(i, HEX);
+        }
+    }
+}
+
+void loop() {}
+```
+
+스캔 결과의 16진수 주소(0x27 또는 0x3F 등)를 코드에 수정해서 사용하면 됩니다.
 
 ---
 
@@ -263,12 +322,14 @@ const int CLOSE_ANGLE = 50;               // 닫힘 각도
 ### ✅ 체크리스트
 - [ ] ESP32 드라이버 설치 완료
 - [ ] ESP32Servo 라이브러리 설치 완료
+- [ ] LiquidCrystal_I2C 라이브러리 설치 완료
 - [ ] 코드 컴파일 및 업로드 완료
 - [ ] 외부 센서 연결 확인
 - [ ] 내부 센서 연결 확인
 - [ ] 서보 모터 연결 확인
 - [ ] LED 연결 확인
 - [ ] 부저 연결 확인
+- [ ] LCD I2C 모듈 연결 확인
 - [ ] 외부 5V 전원 연결 완료
 - [ ] 모든 Phase 테스트 완료
 
@@ -287,4 +348,7 @@ const int CLOSE_ANGLE = 50;               // 닫힘 각도
 | 서보 모터가 작동하지 않음 | USB 전원만 사용 | 외부 5V 전원 추가 연결 |
 | 시리얼 모니터 출력 없음 | 보드레이트 오류 | 115200 baud 설정 확인 |
 | ESP32 재부팅 반복 | 전원 부족 | 외부 전원 연결 확인 |
+| LCD 화면이 안 켜짐 | I2C 연결 오류 또는 주소 오류 | GPIO 21/22 연결 확인, I2C 주소 스캔 |
+| LCD에 텍스트가 보이지 않음 | 대비 조정 필요 | LCD 모듈의 포텐셔미터 조정 (나선형 조정나사) |
+| LCD에서 흰 박스만 보임 | 초기화 오류 | I2C 주소 확인 후 코드 수정 (0x27 또는 0x3F) |
 

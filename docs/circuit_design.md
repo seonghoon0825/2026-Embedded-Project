@@ -13,6 +13,7 @@
 | 서보 모터 | 1 | 쓰레기통 뚜껑 개폐 |
 | LED (초록/노랑/빨강) | 3 | 잔량 표시 |
 | 수동 부저 | 1 | 가득 찼을 때 경고 |
+| **1602 LCD I2C 모듈** | **1** | **상태 표시 디스플레이** |
 | 저항 1k ohm | 1 | 외부 Echo 전압 분배 |
 | 저항 2k ohm | 1 | 외부 Echo 전압 분배 |
 | 저항 220 ohm | 3 | LED 전류 제한 |
@@ -52,6 +53,12 @@ Buzzer +  ---------------+ GPIO 27             |
 Buzzer -  ---------------+ GND                |
                          |                     |
 Servo Signal -----------+ GPIO 19             |
+                         |                     |
+LCD I2C Module:         |                     |
+  SDA -------------------+ GPIO 21 (SDA)      |
+  SCL -------------------+ GPIO 22 (SCL)      |
+  VCC -------------------+ 5V 또는 VIN        |
+  GND -------------------+ GND                |
                          +---------------------+
 
 External 5V (+) --------- Servo VCC
@@ -100,6 +107,17 @@ External 5V (-) --------- Servo GND + ESP32 GND
 | --- | --- | --- |
 | Buzzer + (VCC) | ESP32 GPIO 27 | 부저 신호 제어 |
 | Buzzer - (GND) | ESP32 GND | 부저 접지 |
+
+### 3.6 LCD I2C 모듈 (1602 디스플레이)
+
+| 부품 핀 | 연결 위치 | 설명 |
+| --- | --- | --- |
+| LCD VCC | ESP32 5V 또는 VIN | LCD 모듈 전원 |
+| LCD GND | ESP32 GND | LCD 모듈 접지 |
+| LCD SDA | ESP32 GPIO 21 | I2C 데이터 신호 |
+| LCD SCL | ESP32 GPIO 22 | I2C 클록 신호 |
+
+**주의:** I2C 주소 확인 필요 (기본값: 0x27 또는 0x3F)
 
 ## 4. Echo 전압 분배 회로
 
@@ -168,7 +186,15 @@ const int LED_RED_PIN = 14;      // 거의 찼음 (경고)
 const int BUZZER_PIN = 27;
 ```
 
-### 6.6 잔량 기준값
+### 6.6 LCD I2C 모듈
+```cpp
+const int LCD_ADDR = 0x27;  // I2C 주소 (0x27 또는 0x3F)
+const int LCD_COLS = 16;    // LCD 열 수
+const int LCD_ROWS = 2;     // LCD 행 수
+// I2C: SDA = GPIO 21, SCL = GPIO 22
+```
+
+### 6.7 잔량 기준값
 ```cpp
 const float TRASH_CAN_HEIGHT_CM = 30.0;  // 쓰레기통 높이
 const float FULL_THRESHOLD_CM = 5.0;     // 가득 참 (상단에서 5cm)

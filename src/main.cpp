@@ -1,4 +1,12 @@
 #include <ESP32Servo.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// I2C LCD 설정 (1602 LCD I2C 모듈)
+const int LCD_ADDR = 0x27;  // I2C 주소 (0x27 또는 0x3F, 스캔해서 확인 필요)
+const int LCD_COLS = 16;
+const int LCD_ROWS = 2;
+LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 // 외부 센서 (손 감지)
 const int EXT_TRIG_PIN = 5;
@@ -40,6 +48,7 @@ const unsigned long SAMPLE_INTERVAL_MS = 60;
 const unsigned long OPEN_HOLD_TIME_MS = 3000;
 const unsigned long SERIAL_PRINT_INTERVAL_MS = 500;
 const unsigned long BUZZER_DURATION_MS = 1000;
+const unsigned long LCD_UPDATE_INTERVAL_MS = 200;  // LCD 업데이트 간격 (200ms)
 
 enum LidState {
     CLOSED,
@@ -60,6 +69,7 @@ unsigned long lastSampleAt = 0;
 unsigned long openedAt = 0;
 unsigned long lastSerialPrintAt = 0;
 unsigned long buzzerStartAt = 0;
+unsigned long lastLcdUpdateAt = 0;  // LCD 마지막 업데이트 시간
 int stableDetectCount = 0;
 bool buzzerActive = false;
 
@@ -67,6 +77,7 @@ float readDistanceCm(int trigPin, int echoPin);
 void updateTrashLevel(float internalDistanceCm);
 void updateLED();
 void updateBuzzer(unsigned long now);
+void updateLcd(float externalDistanceCm, float internalDistanceCm);
 void openLid(unsigned long now);
 void closeLid();
 void stopBuzzer();
@@ -75,6 +86,16 @@ void printStatus(float externalDistanceCm, float internalDistanceCm);
 void setup() {
     Serial.begin(115200);
     delay(1000);
+
+    // I2C 및 LCD 초기화
+    Wire.begin(21, 22);  // SDA=GPIO21, SCL=GPIO22
+    lcd.init();
+    lcd.backlight();
+    lcd.print("Smart Trash Can");
+    lcd.setCursor(0, 1);
+    lcd.print("Initializing...");
+    delay(2000);
+    lcd.clear();
 
     // 외부 센서 (손 감지) 설정
     pinMode(EXT_TRIG_PIN, OUTPUT);
@@ -107,7 +128,7 @@ void setup() {
     Serial.println("Smart Trash Can Controller Started");
     Serial.println("===========================================");
     Serial.println("Sensors: External (hand detection) + Internal (trash level)");
-    Serial.println("Controls: Servo + LED indicator + Buzzer alarm");
+    Serial.println("Controls: Servo + LED indicator + Buzzer alarm + LCD Display");
     Serial.println("===========================================\n");
 }
 
@@ -160,6 +181,12 @@ void loop() {
     if (now - lastSerialPrintAt >= SERIAL_PRINT_INTERVAL_MS) {
         lastSerialPrintAt = now;
         printStatus(externalDistanceCm, internalDistanceCm);
+    }
+
+    // LCD 업데이트
+    if (now - lastLcdUpdateAt >= LCD_UPDATE_INTERVAL_MS) {
+        lastLcdUpdateAt = now;
+        updateLcd(externalDistanceCm, internalDistanceCm);
     }
 }
 
@@ -298,4 +325,49 @@ void printStatus(float externalDistanceCm, float internalDistanceCm) {
     }
 
     Serial.println();
+}
+
+void updateLcd(float externalDistanceCm, float internalDistanceCm) {
+    lcd.clear();
+
+    // 첫 번째 줄: 손 감지 상태 및 뚜껑 상태
+    lcd.setCursor(0, 0);
+    if (externalDistanceCm > 0 && externalDistanceCm <= DETECT_DISTANCE_CM) {
+        lcd.print("Hand:");
+        lcd.print((int)externalDistanceCm);
+        lcd.print("cm");
+    } else {
+        lcd.print("Hand:--");
+    }
+    
+    // 뚜껑 상태 표시 (오른쪽)
+    lcd.setCursor(12, 0);
+    lcd.print(lidState == OPENED ? "OPEN" : "CLOS");
+
+    // 두 번째 줄: 쓰레기 잔량 상태
+    lcd.setCursor(0, 1);
+    
+    switch (trashLevel) {
+        case EMPTY:
+            lcd.print("Trash: OK");
+            lcd.setCursor(10, 1);
+            lcd.print("[G]");
+            break;
+        case NORMAL:
+            lcd.print("Trash: ");
+            if (internalDistanceCm > 0) {
+                lcd.print((int)internalDistanceCm);
+                lcd.print("cm");
+            } else {
+                lcd.print("--");
+            }
+            lcd.setCursor(10, 1);
+            lcd.print("[Y]");
+            break;
+        case FULL:
+            lcd.print("Trash: FULL!");
+            lcd.setCursor(10, 1);
+            lcd.print("[R]");
+            break;
+    }
 }
