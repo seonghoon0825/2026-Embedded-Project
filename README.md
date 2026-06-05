@@ -71,13 +71,21 @@
 
 ## 8. Directory
 ```
-├── src/                    # 실제 코드가 들어가는 폴더
-│   └── main.cpp            # ESP32 메인 제어 코드
-├── docs/                   # 프로젝트 관련 문서 폴더
-│   ├── circuit_diagram.png # 회로도 이미지 파일
-│   ├── circuit_diagram.svg # 수정 가능한 회로도 파일
-│   ├── circuit_design.md   # 회로 연결 및 전원 구성 문서
-│   └── embedded_code_guide.md # 임베디드 코드 작성 가이드
-├── .gitignore              # 깃허브에 올리지 않을 파일 목록
-└── README.md               # 프로젝트 설명 (지금 쓰고 계신 것!)
+├── src/                         # 실제 코드가 들어가는 폴더
+│   └── main.cpp                 # ESP32 메인 제어 코드
+├── docs/                        # 프로젝트 관련 문서 폴더
+│   ├── circuit_diagram.png      # 회로도 이미지 파일
+│   ├── circuit_diagram.svg      # 수정 가능한 회로도 파일
+│   ├── circuit_design.md        # 회로 연결 및 전원 구성 문서
+│   ├── embedded_code_guide.md   # 임베디드 코드 작성 가이드
+│   └── INSTALLATION_AND_SETUP.md # 하드웨어 설치 및 실행 가이드 ⭐
+├── .gitignore                   # 깃허브에 올리지 않을 파일 목록
+└── README.md                    # 프로젝트 개요 및 팀 정보
 ```
+
+## 9. 📖 문서 가이드
+
+- **[README.md](README.md)** - 프로젝트 개요, 팀 구성, 일정
+- **[circuit_design.md](docs/circuit_design.md)** - 회로 설계 및 핀 맵핑
+- **[INSTALLATION_AND_SETUP.md](docs/INSTALLATION_AND_SETUP.md)** - 💡 **하드웨어 설치, 부착 위치, 실행 방법 (여기서 시작!)**
+- **[embedded_code_guide.md](docs/embedded_code_guide.md)** - 코드 작성 가이드
