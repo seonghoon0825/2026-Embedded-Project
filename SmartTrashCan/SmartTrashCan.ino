@@ -1,6 +1,26 @@
 #include <ESP32Servo.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+// ==============================
+// Wi-Fi / UDP 설정
+// ==============================
+const char* WIFI_SSID = "GalaxyS21+5G0523";
+const char* WIFI_PASSWORD = "2271106377";
+
+// 핸드폰이 핫스팟이므로 핸드폰 IP = 게이트웨이 IP (자동 인식)
+// 앱에서 열어 둘 UDP 포트
+const uint16_t PHONE_PORT = 5005;
+const char* DEVICE_ID = "esp32-trashcan";
+const unsigned long UDP_SEND_INTERVAL_MS = 1000; // 전송 주기 1초
+
+WiFiUDP udp;
+unsigned long lastUdpSendAt = 0;
+unsigned long udpSequence = 0;
+unsigned long lastWifiRetryAt = 0;
+const unsigned long WIFI_RETRY_INTERVAL_MS = 300000; // Wi-Fi 재연결 시도 간격 (5분)
 
 // I2C LCD 설정 (PCF8574AT 백팩 모듈)
 const int LCD_SDA = 4;
@@ -37,10 +57,11 @@ const float TRASH_CAN_HEIGHT_CM = 30.0;
 const float FULL_THRESHOLD_CM = 5.0;
 const float YELLOW_THRESHOLD_CM = 12.0;
 
-const int CLOSE_ANGLE = 100;
-const int OPEN_ANGLE = 50;
+const int CLOSE_ANGLE = 180;
+const int OPEN_ANGLE = 90;
 const int SERVO_MIN_US = 500;
 const int SERVO_MAX_US = 2400;
+const int SERVO_STEP_DELAY_MS = 15; // 뚜껑 열림/닫힘 속도 (값이 클수록 천천히)
 
 const unsigned long SAMPLE_INTERVAL_MS = 60;
 const unsigned long OPEN_HOLD_TIME_MS = 3000;
@@ -70,6 +91,9 @@ int stableDetectCount = 0;
 int lightAnalogValue = 0;
 bool lightDigitalValue = false;
 
+unsigned long lastOpenTimeSec = 0; // 모터(뚜껑)가 마지막으로 열린 시각 (부팅 후 초)
+int trashFillPercent = 0;          // 쓰레기 잔량 (0~100%)
+
 float readDistanceCm(int trigPin, int echoPin);
 void updateTrashLevel(float internalDistanceCm);
 void readLightSensor();
@@ -77,6 +101,9 @@ void updateLcd(float externalDistanceCm, float internalDistanceCm);
 void openLid(unsigned long now);
 void closeLid();
 void printStatus(float externalDistanceCm, float internalDistanceCm);
+void connectWiFi();
+void sendUdpStatus();
+void receiveUdpCommand(unsigned long now);
 
 void setup() {
     Serial.begin(115200);
@@ -109,6 +136,14 @@ void setup() {
     lidServo.setPeriodHertz(50);
     lidServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
     closeLid();
+
+    // Wi-Fi 연결 및 UDP 시작
+    connectWiFi();
+    if (udp.begin(4000)) {
+        Serial.println("[UDP] 로컬 UDP 포트 4000 시작");
+    } else {
+        Serial.println("[UDP] UDP 초기화 실패");
+    }
 
     Serial.println("\n===========================================");
     Serial.println("Smart Trash Can Controller Started");
@@ -172,6 +207,21 @@ void loop() {
         lastLcdUpdateAt = now;
         updateLcd(externalDistanceCm, internalDistanceCm);
     }
+
+    // Wi-Fi가 끊어지면 재연결 (30초마다 한 번만 시도, 매 루프 멈춤 방지)
+    if (WiFi.status() != WL_CONNECTED && now - lastWifiRetryAt >= WIFI_RETRY_INTERVAL_MS) {
+        lastWifiRetryAt = now;
+        connectWiFi();
+    }
+
+    // 핸드폰에서 보낸 명령 수신 (원격으로 뚜껑 열기)
+    receiveUdpCommand(now);
+
+    // UDP로 핸드폰에 상태 전송 (모터 동작 시간 + 쓰레기 잔량)
+    if (now - lastUdpSendAt >= UDP_SEND_INTERVAL_MS) {
+        lastUdpSendAt = now;
+        sendUdpStatus();
+    }
 }
 
 float readDistanceCm(int trigPin, int echoPin) {
@@ -192,15 +242,24 @@ float readDistanceCm(int trigPin, int echoPin) {
 }
 
 void openLid(unsigned long now) {
-    lidServo.write(OPEN_ANGLE);
+    // 닫힘(CLOSE_ANGLE) → 열림(OPEN_ANGLE)까지 1도씩 천천히 이동
+    for (int angle = CLOSE_ANGLE; angle >= OPEN_ANGLE; angle -= 1) {
+        lidServo.write(angle);
+        delay(SERVO_STEP_DELAY_MS);
+    }
     lidState = OPENED;
     openedAt = now;
+    lastOpenTimeSec = now / 1000; // 모터가 움직인 시각 기록
     stableDetectCount = 0;
     Serial.println(">>> Lid OPENED");
 }
 
 void closeLid() {
-    lidServo.write(CLOSE_ANGLE);
+    // 열림(OPEN_ANGLE) → 닫힘(CLOSE_ANGLE)까지 1도씩 천천히 이동
+    for (int angle = OPEN_ANGLE; angle <= CLOSE_ANGLE; angle += 1) {
+        lidServo.write(angle);
+        delay(SERVO_STEP_DELAY_MS);
+    }
     lidState = CLOSED;
     stableDetectCount = 0;
     Serial.println(">>> Lid CLOSED");
@@ -209,8 +268,15 @@ void closeLid() {
 void updateTrashLevel(float internalDistanceCm) {
     if (internalDistanceCm < 0) {
         trashLevel = EMPTY;
+        trashFillPercent = 0;
         return;
     }
+
+    // 잔량 퍼센트 계산 (거리가 가까울수록 가득 참)
+    float fill = (TRASH_CAN_HEIGHT_CM - internalDistanceCm) / TRASH_CAN_HEIGHT_CM * 100.0;
+    if (fill < 0) fill = 0;
+    if (fill > 100) fill = 100;
+    trashFillPercent = (int)fill;
 
     if (internalDistanceCm <= FULL_THRESHOLD_CM) {
         trashLevel = FULL;
@@ -302,5 +368,118 @@ void updateLcd(float externalDistanceCm, float internalDistanceCm) {
         case FULL:
             lcd.print("Trash:FULL!");
             break;
+    }
+}
+
+// ==============================
+// Wi-Fi 연결
+// ==============================
+void connectWiFi() {
+    if (WiFi.status() == WL_CONNECTED) {
+        return;
+    }
+
+    Serial.printf("[WiFi] %s 연결 시도\n", WIFI_SSID);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    // 최대 8초만 시도하고, 연결 안 되면 포기하고 진행 (쓰레기통은 계속 작동)
+    unsigned long connectionStart = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - connectionStart < 8000) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println();
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("[WiFi] 연결 완료");
+        Serial.print("[WiFi] ESP32 IP: ");
+        Serial.println(WiFi.localIP());
+        Serial.print("[WiFi] 핸드폰(게이트웨이) IP: ");
+        Serial.print(WiFi.gatewayIP());
+        Serial.print(":");
+        Serial.println(PHONE_PORT);
+    } else {
+        Serial.println("[WiFi] 연결 실패 - 오프라인 모드로 진행");
+    }
+}
+
+// ==============================
+// UDP로 핸드폰에 상태 전송
+// (모터 동작 시간 + 쓰레기 잔량만)
+// ==============================
+void sendUdpStatus() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[UDP] Wi-Fi 연결 안 됨");
+        return;
+    }
+
+    udpSequence++;
+
+    const char* levelStr = "EMPTY";
+    if (trashLevel == NORMAL) levelStr = "NORMAL";
+    else if (trashLevel == FULL) levelStr = "FULL";
+
+    // 전송할 JSON 생성 (필요한 정보만)
+    String json = "{";
+    json += "\"deviceId\":\"";
+    json += DEVICE_ID;
+    json += "\",";
+    json += "\"lastOpenTimeSec\":"; // 모터가 마지막으로 열린 시각 (초)
+    json += lastOpenTimeSec;
+    json += ",";
+    json += "\"trashLevel\":\"";    // 잔량 상태 (EMPTY/NORMAL/FULL)
+    json += levelStr;
+    json += "\",";
+    json += "\"trashFillPercent\":"; // 잔량 퍼센트 (0~100)
+    json += trashFillPercent;
+    json += "}";
+
+    // 핸드폰(게이트웨이) IP로 UDP 전송
+    IPAddress phoneIp = WiFi.gatewayIP();
+    if (!udp.beginPacket(phoneIp, PHONE_PORT)) {
+        Serial.println("[UDP] 패킷 생성 실패");
+        return;
+    }
+
+    udp.write(reinterpret_cast<const uint8_t*>(json.c_str()), json.length());
+
+    if (udp.endPacket() == 1) {
+        Serial.print("[UDP] 전송 완료: ");
+        Serial.println(json);
+    } else {
+        Serial.println("[UDP] 전송 실패");
+    }
+}
+
+// ==============================
+// 핸드폰에서 보낸 명령 수신
+// "OPEN" 문자열을 받으면 원격으로 뚜껑 열기
+// ==============================
+void receiveUdpCommand(unsigned long now) {
+    int packetSize = udp.parsePacket();
+    if (packetSize <= 0) {
+        return;
+    }
+
+    char buffer[32];
+    int len = udp.read(buffer, sizeof(buffer) - 1);
+    if (len <= 0) {
+        return;
+    }
+    buffer[len] = '\0';
+
+    Serial.print("[UDP] 명령 수신: ");
+    Serial.println(buffer);
+
+    // "OPEN" 명령 → 뚜껑 열기
+    if (strncmp(buffer, "OPEN", 4) == 0) {
+        if (lidState == CLOSED) {
+            openLid(now);
+            Serial.println(">>> 핸드폰 명령으로 뚜껑 열림");
+        } else {
+            // 이미 열려 있으면 열림 시간 연장
+            openedAt = now;
+        }
     }
 }
